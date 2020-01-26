@@ -61,50 +61,29 @@ Rule* read_rule(FILE* file) {
     return rule;
 }
 
-static std::map<std::string, std::pair<unsigned, unsigned>> best;
-unsigned search_it(const std::map<std::string, Rule*>& rules, const std::string& target, unsigned target_count, unsigned& extra) {
-    printf("Searching for %s qty %i\n", target.c_str(), target_count);
+static std::map<std::string, unsigned> produced;
+unsigned total = 0;
+void search_it(const std::map<std::string, Rule*>& rules, const std::string& target, unsigned target_count) {
+    if(produced[target] >= target_count) {
+        produced[target] -= target_count;
+        return;
+    }
+
+    target_count -= produced[target];
+    produced[target] = 0;
 
     if(target == "ORE") {
-        printf("Reached base %i\n", target_count);
-        return target_count;
+        total += target_count;
+        return;
     }
 
-    auto found = best.find(target);
-    unsigned ore_count, need_count, generated_count;
-    if(found != best.end()) {
-        ore_count = found->second.first;
-        generated_count = found->second.second;
-        need_count = ore_count * (1 + (target_count  / generated_count));
-    }
-    else {
-        ore_count = 0;
-        for(auto input = rules.at(target)->inputs.begin(); input != rules.at(target)->inputs.end(); input++) {
-            ore_count += search_it(rules, input->name, input->count, extra);
-        }
-        generated_count = rules.at(target)->output.count;
-        need_count = ore_count * (1 + (target_count  / generated_count));
-        // Log this for later
-        best[target] = std::pair<unsigned, unsigned>(ore_count, generated_count);
+    unsigned num_needed = 1 + (target_count - 1) / rules.at(target)->output.count;
+
+    for(auto input = rules.at(target)->inputs.begin(); input != rules.at(target)->inputs.end(); input++) {
+        search_it(rules, input->name, num_needed * input->count);
     }
 
-    printf("To make %i %s, need %i ORE\n", generated_count, target.c_str(), ore_count);
-    printf("To make %i %s, need %i ORE, have %i extra\n", target_count, target.c_str(), need_count, extra);
-
-    if(extra <= need_count) {
-        // Extra not quite enough to cover
-        need_count -= extra;
-        extra = 0;
-    }
-    else {
-        extra -= need_count;
-        need_count = 0;
-    }
-
-    if(need_count > ore_count) {
-        extra += need_count % ore_count;
-    }
-    return need_count;
+    produced[target] += num_needed * rules.at(target)->output.count - target_count;
 }
 
 int main(int argc, char ** argv) {
@@ -128,7 +107,6 @@ int main(int argc, char ** argv) {
         printf("\n");
     }
 
-    unsigned extra = 0;
-    unsigned count = search_it(rules, "FUEL", 1, extra);
-    printf("Need %i ore\n", count);
+    search_it(rules, "FUEL", 1);
+    printf("Need %i ore\n", total);
 }
