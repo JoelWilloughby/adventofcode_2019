@@ -61,12 +61,12 @@ Rule* read_rule(FILE* file) {
     return rule;
 }
 
-static std::map<std::string, unsigned> produced;
-unsigned total = 0;
-void search_it(const std::map<std::string, Rule*>& rules, const std::string& target, unsigned target_count) {
+static std::map<std::string, unsigned long long> produced;
+unsigned long long total = 0;
+bool search_it(const std::map<std::string, Rule*>& rules, const std::string& target, unsigned long long target_count) {
     if(produced[target] >= target_count) {
         produced[target] -= target_count;
-        return;
+        return true;
     }
 
     target_count -= produced[target];
@@ -74,16 +74,21 @@ void search_it(const std::map<std::string, Rule*>& rules, const std::string& tar
 
     if(target == "ORE") {
         total += target_count;
-        return;
+        return false;
     }
 
-    unsigned num_needed = 1 + (target_count - 1) / rules.at(target)->output.count;
+    unsigned long long num_needed = 1 + (target_count - 1) / rules.at(target)->output.count;
 
+    bool can_produce = true;
     for(auto input = rules.at(target)->inputs.begin(); input != rules.at(target)->inputs.end(); input++) {
-        search_it(rules, input->name, num_needed * input->count);
+        if(!search_it(rules, input->name, num_needed * input->count)) {
+            can_produce = false;
+        }
     }
 
     produced[target] += num_needed * rules.at(target)->output.count - target_count;
+
+    return can_produce;
 }
 
 int main(int argc, char ** argv) {
@@ -108,5 +113,30 @@ int main(int argc, char ** argv) {
     }
 
     search_it(rules, "FUEL", 1);
-    printf("Need %i ore\n", total);
+    unsigned temp = total;
+
+    produced.clear();
+
+    produced["ORE"] = 1000000000000;
+    unsigned long long count = 0;
+    auto back_produced = produced;
+    unsigned long long target = 1;
+    bool done = false;
+    while(!done) {
+        if(search_it(rules, "FUEL", target)) {
+            printf("Made %lli FUEL\n", target);
+            count += target;
+            target <<= 1;
+            back_produced = produced;
+        }
+        else {
+            target >>= 1;
+            produced = back_produced;
+        }
+        if(target == 0) {
+            done = true;
+        }
+    }
+
+    printf("To produce 1 fuel, need %i. Num FUEL produced is %lli. ORE remaining is: %lli\n", temp, count, produced["ORE"]);
 }
