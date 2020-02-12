@@ -20,6 +20,7 @@ struct Point {
         return x == other.x && y == other.y;
     }
 
+    // Needed so we use this as a key in some maps
     bool operator< (const Point& other) const {
         if(x < other.x) {
             return true;
@@ -32,6 +33,7 @@ struct Point {
         return false;
     }
 
+    // Just returns the Manhattan distance to the other point
     unsigned distance_to(const Point& p) const {
         return abs(x - p.x) + abs(y - p.y);
     }
@@ -40,6 +42,12 @@ struct Point {
     int y;
 };
 
+
+// This struct is supposed to be a set representing the keys we have collected
+// so far. Since keys are letters, there can only ever be 26 of them at most,
+// so just jam them in a u32 bitfield. This allows for quick lookup of whether
+// or not we have keys as well as efficient set operations (intersect, union, etc)
+// should we end up needing them
 struct KeyBitfield {
     KeyBitfield(bool init) {
         if(init) {
@@ -50,29 +58,35 @@ struct KeyBitfield {
         }
     }
 
+    // So we can use this freely in STL containers
     bool operator< (const KeyBitfield& other) const {
         return bitfield < other.bitfield;
     }
 
+    // Puts a given key into the set
     void set(char c) {
         c = tolower(c) - 'a';
         bitfield |= (1 << c);
     }
 
+    // Removes a given key from the set
     void clear(char c) {
         c = tolower(c) - 'a';
         bitfield &= ~(1 << c);
     }
 
+    // Returns true iff the given key is in the set
     bool get(char c) const {
         c = tolower(c) - 'a';
         return ((1 << c) & bitfield) != 0;
     }
 
+    // Returns true iff all the keys in other are also in this set
     bool contains(const KeyBitfield& other) const {
         return (bitfield & other.bitfield) == other.bitfield;
     }
 
+    // Returns the number of keys in the set
     unsigned num_set() const {
         return __builtin_popcount(bitfield);
     }
@@ -80,6 +94,10 @@ struct KeyBitfield {
     uint32_t bitfield;
 };
 
+// This is used in our main A* search
+// Each node consists of the current location of the robot(s),
+// the estimated fitness of the node, the keys collected so far,
+// and the distance required to get to this point.
 struct Node {
     Node(const char* locs, unsigned fitness, const KeyBitfield& keys, unsigned distance) :
     fitness(fitness), keys(keys), distance(distance) {
@@ -88,36 +106,52 @@ struct Node {
         }
     }
 
+    // There are 4 chars because of Part 2, when we can have up to 4 robots
+    // at a time. This array just represents wach of their locations
     char locs[4];
+    // This is the heuristic part of the A* search. To work, the heuristic
+    // must be admissible, meaning it never over-estimates the actual cost of
+    // this node.
     unsigned fitness;
+    // The keys collected so far at this node
     KeyBitfield keys;
+    // The distance required to reach this node
     unsigned distance;
 };
 
+// Used in the priority queue later during A*. Basically just compares
+// 2 nodes in such a way that the STL priority_queue will prioritize nodes
+// that have lower distance + fitness
 struct CompareNode  {
-    // Should be true when the lhs has a worse fitness than the rhs
+    // Should be true when the lhs has a worse priority than the rhs
     bool operator()(Node& lhs, Node& rhs) {
         if(lhs.distance + lhs.fitness != rhs.distance + rhs.fitness) {
+            // Worse priority means more distance estimate
             return lhs.distance + lhs.fitness > rhs.distance + rhs.fitness;
         }
         if(lhs.keys.num_set() != rhs.keys.num_set()) {
+            // Worse priority means less keys collected so far
             return lhs.keys.num_set() < rhs.keys.num_set();
         }
         for(int i=0; i<4; i++) {
             if(lhs.locs[i] != rhs.locs[i]) {
+                // Arbitrary, just use alphabetical order
                 return lhs.locs[i] < rhs.locs[i];
             }
         }
+        // These nodes are definitely equal
         return false;
     }
 };
 
+// The main runner of this problem
 class Maze {
 public:
     Maze(vector<vector<char>>& board) : board(board), num_keys(0) {
         initialize();
     }
 
+    // Prints the board
     void print_board() {
         for(auto row : board) {
             for (auto c : row) {
@@ -129,6 +163,7 @@ public:
         printf("Num keys: %i\n", num_keys);
     }
 
+    // Reads the given board and collects all of the key locations
     void initialize() {
         num_keys = 0;
         for(int i=0; i<board.size(); i++) {
@@ -149,7 +184,12 @@ public:
         }
     }
 
+    // Used in the lower level BFS to get pairwise distances between keys
+    // A point on the board is visitable if it is not a wall and it has not
+    // been visited yet and (if it is a door, we have already collected the
+    // key to that door).
     bool vistable(const Point& p, const vector<vector<bool>>& visited, const KeyBitfield& keys) const {
+        // Check out of bounds. Shouldn't happen due to the border but (shurg)
         if(p.x < 0 || p.y < 0 || p.x >= board.size() || p.y >= board[0].size()) {
             return false;
         }
@@ -160,6 +200,7 @@ public:
 
         char c = board[p.x][p.y];
         if(c == '#') {
+            // Its a wall
             return false;
         }
 
@@ -172,16 +213,26 @@ public:
         return true;
     }
 
+    // Returns the distance from one node to another assuming some number of
+    // keys have been collected. This functions uses a BFS to search from from
+    // to to assuming keys collected. It is called a bunch of times from the
+    // outer A* loop, and some attempt at memoization has been made. The jury
+    // is still out on how well that performs
+    // TODO: Make the memoization better. Should be able to be much smarter about
+    // keys collected
+    // Note that we don't worry about collecting keys in this function. This is
+    // due to the fact that in our outer loop, we will also handle the case
+    // that we wnet directly to that key
     int distance_to(char from, char to, const KeyBitfield& keys) const {
+        // Memoize
         static map<tuple<char, char>, map<KeyBitfield, int>> memo;
-//        tuple<char, char, unsigned> memo_index(from, to, keys.bitfield);
         tuple<char, char> memo_index(from, to);
         unsigned bitfield = keys.bitfield;
         auto res = memo.find(memo_index);
         if(res != memo.end()) {
             for(auto temp : res->second) {
                 if(temp.first.contains(keys)) {
-                    printf("Used memo!\n");
+                    // printf("Used memo!\n");
                     return temp.second;
                 }
             }
@@ -200,7 +251,6 @@ public:
             visited.push_back(temp);
         }
 
-        KeyBitfield doors(false);
         // Must search over cells. This is quite annoying and why we need to cache!
         while(!frontier.empty()) {
             pair<Point, int> curr = frontier.front();
@@ -214,7 +264,7 @@ public:
             // Mark visited
             visited[curr.first.x][curr.first.y] = true;
 
-            // Visit this node.
+            // Put all the nodes neighbors in the frontier
             Point up(curr.first.x, curr.first.y - 1);
             Point down(curr.first.x, curr.first.y + 1);
             Point left(curr.first.x - 1, curr.first.y);
@@ -238,6 +288,7 @@ public:
         return -1;
     }
 
+    // Heuristic for evaluating estimated cost to goal
     unsigned guesstimate(char c, const KeyBitfield& seen, int quadrant=-1) const {
         // Just going to use the max distance to all remaining keys. Shrug
         unsigned max = 0;
@@ -248,6 +299,9 @@ public:
             }
             bool should_skip = false;
             if(quadrant != -1) {
+                // This helps the four robot case in part 2. To remain admissible,
+                // we need to use only the other keys in our quadrant to estimate
+                // fitness.
                 int x_dir = quadrant % 2 ? 1 : -1;
                 int y_dir = quadrant / 2 ? 1 : -1;
 
@@ -263,6 +317,7 @@ public:
                 }
             }
             if(should_skip) {
+                // Not in our quadrant
                 continue;
             }
 
@@ -275,11 +330,17 @@ public:
         return max;
     }
 
+    // Main runner of the problem. Runs A* on the keys collected. Can handle up to
+    // 4 robots. If wanting to do 4 bots, should call split beforehand.
     void search_it(int num_bots=1) const {
+        // The frontier, prioritized by minimum (distance_so_far + fitness)
         priority_queue<Node, vector<Node>, CompareNode> frontier;
+        // Can be used to prune early. If visited keys already contains a key that
+        // you are currently on, you don't have to search due to the optimaility of
+        // BFS/A*
         vector<KeyBitfield> visited_keys[255][num_bots];
 
-        // Prime the pump
+        // Prime the pump. Ordering of the characters matters! Quadrant is important
         frontier.push(Node("@!$*", 0, KeyBitfield(false), 0));
 
         // Do the search
@@ -287,22 +348,29 @@ public:
             // Pop off the head.
             Node curr = frontier.top();
             frontier.pop();
+
             KeyBitfield new_keys = curr.keys;
+
+            // Check to see if this node is a strictly worse node than we have seen
+            // before
             bool key_found = false;
             for(int i=0; i<num_bots; i++) {
                 if (isalpha(curr.locs[i])) {
+                    // Visit this new location
                     new_keys.set(curr.locs[i]);
                 }
             }
             for(int i=0; i<num_bots; i++) {
                 for(auto key : visited_keys[curr.locs[i]][i]) {
                     if(key.contains(new_keys)) {
-                        // Skip this key
+                        // This set of keys is a direct subset of an already found
+                        // set of keys and we are at the same location.
                         key_found = true;
                     }
                 }
 
                 if(!key_found) {
+                    // Add it to our cache
                     visited_keys[curr.locs[i]][i].push_back(new_keys);
                 }
             }
@@ -311,16 +379,17 @@ public:
                 continue;
             }
 
+            // Debugging proves useful
 //            printf("Handling: %c%c%c%c, %i, %i, %08x\n", curr.locs[0], curr.locs[1], curr.locs[2], curr.locs[3], curr.distance, curr.fitness, curr.keys.bitfield);
 
             if(new_keys.num_set() == num_keys) {
-                // We did it!
+                // We did it! We found all the keys!
                 printf("We did it: %i\n", curr.distance);
                 return;
             }
 
             for(int i=0; i<num_keys; i++) {
-                // Search through all the keys
+                // Search through all the possible neighbors
                 char neighbor = 'a' + i;
                 if(new_keys.get(neighbor)) {
                     // Already visited this node on this path
@@ -351,6 +420,7 @@ public:
         printf("Failed to find solution\n");
     }
 
+    // Turns the board from part 1 into the one needed for part 2
     void split() {
         for(int i=0; i<board.size(); i++) {
             for(int j=0; j<board[i].size(); j++) {
@@ -373,15 +443,11 @@ public:
                 }
             }
         }
-
-//        for(int i=0; i<num_keys; i++) {
-//            distance_to('@', 'a' + i, KeyBitfield(true));
-//        }
     }
 
 
     vector<vector<char>> board;
-    // Indexable via a letter
+    // Indexable via a character
     Point key_locs[256];
     Point door_locs[256];
     int num_keys;
@@ -422,6 +488,7 @@ int main(int argc, char ** argv) {
 
     Maze maze(board);
     maze.print_board();
+    // Uncomment to run part 1 as well. Can take a while
 //    maze.search_it();
     maze.split();
     maze.print_board();
