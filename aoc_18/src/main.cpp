@@ -1,6 +1,8 @@
 #include <cstdio>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <cmath>
 #include <queue>
 #include <set>
@@ -79,11 +81,14 @@ struct KeyBitfield {
 };
 
 struct Node {
-    Node(char c, unsigned fitness, const KeyBitfield& keys, unsigned distance) :
-     c(c), fitness(fitness), keys(keys), distance(distance) {
+    Node(const char* locs, unsigned fitness, const KeyBitfield& keys, unsigned distance) :
+    fitness(fitness), keys(keys), distance(distance) {
+        for(int i=0; i<4; i++) {
+            this->locs[i] = locs[i];
+        }
     }
 
-    char c;
+    char locs[4];
     unsigned fitness;
     KeyBitfield keys;
     unsigned distance;
@@ -98,13 +103,18 @@ struct CompareNode  {
         if(lhs.keys.num_set() != rhs.keys.num_set()) {
             return lhs.keys.num_set() < rhs.keys.num_set();
         }
-        return lhs.c > rhs.c;
+        for(int i=0; i<4; i++) {
+            if(lhs.locs[i] != rhs.locs[i]) {
+                return lhs.locs[i] < rhs.locs[i];
+            }
+        }
+        return false;
     }
 };
 
 class Maze {
 public:
-    Maze(vector<vector<char>>& board) : board(board), num_keys(0), start_loc() {
+    Maze(vector<vector<char>>& board) : board(board), num_keys(0) {
         initialize();
     }
 
@@ -117,7 +127,6 @@ public:
         }
 
         printf("Num keys: %i\n", num_keys);
-        printf("Start location: %i, %i\n", start_loc.x, start_loc.y);
     }
 
     void initialize() {
@@ -134,8 +143,7 @@ public:
                     num_keys++;
                 }
                 else if (c == '@') {
-                    start_loc = Point(i,j);
-                    key_locs[c] = start_loc;
+                    key_locs[c] = Point(i,j);
                 }
             }
         }
@@ -179,7 +187,6 @@ public:
             }
         }
 
-        // Bredth first search. This should also be memoized most likely.
         queue<pair<Point, int>> frontier;
         frontier.push(pair<Point, int>(key_locs[from], 0));
         Point target = key_locs[to];
@@ -231,7 +238,7 @@ public:
         return -1;
     }
 
-    unsigned guesstimate(char c, const KeyBitfield& seen) const {
+    unsigned guesstimate(char c, const KeyBitfield& seen, int quadrant=-1) const {
         // Just going to use the max distance to all remaining keys. Shrug
         unsigned max = 0;
         for(int i=0; i<num_keys; i++) {
@@ -239,6 +246,26 @@ public:
             if(seen.get(temp)) {
                 continue;
             }
+            bool should_skip = false;
+            if(quadrant != -1) {
+                int x_dir = quadrant % 2 ? 1 : -1;
+                int y_dir = quadrant / 2 ? 1 : -1;
+
+                int x = key_locs[temp].x;
+                int y = key_locs[temp].y;
+
+                if(x_dir * (x - board.size() / 2) < 0) {
+                    should_skip = true;
+                }
+
+                if(y_dir * (y - board.size() / 2) < 0) {
+                    should_skip = true;
+                }
+            }
+            if(should_skip) {
+                continue;
+            }
+
             unsigned distance = key_locs[c].distance_to(key_locs[temp]);
             if(distance > max) {
                 max = distance;
@@ -248,13 +275,12 @@ public:
         return max;
     }
 
-    void search_it() const {
+    void search_it(int num_bots=1) const {
         priority_queue<Node, vector<Node>, CompareNode> frontier;
-        set<pair<char, unsigned>> visited;
-        vector<KeyBitfield> visited_keys[255];
+        vector<KeyBitfield> visited_keys[255][num_bots];
 
         // Prime the pump
-        frontier.push(Node('@', 0, KeyBitfield(false), 0));
+        frontier.push(Node("@!$*", 0, KeyBitfield(false), 0));
 
         // Do the search
         while(!frontier.empty()) {
@@ -262,24 +288,30 @@ public:
             Node curr = frontier.top();
             frontier.pop();
             KeyBitfield new_keys = curr.keys;
-            if(curr.c != '@') {
-                new_keys.set(curr.c);
-            }
             bool key_found = false;
-            for(auto key : visited_keys[curr.c]) {
-                if(key.contains(new_keys)) {
-                    // Skip this key
-                    key_found = true;
+            for(int i=0; i<num_bots; i++) {
+                if (isalpha(curr.locs[i])) {
+                    new_keys.set(curr.locs[i]);
                 }
             }
-//            if(visited.find(pair<char, unsigned>(curr.c, curr.keys.bitfield)) != visited.end()) {
+            for(int i=0; i<num_bots; i++) {
+                for(auto key : visited_keys[curr.locs[i]][i]) {
+                    if(key.contains(new_keys)) {
+                        // Skip this key
+                        key_found = true;
+                    }
+                }
+
+                if(!key_found) {
+                    visited_keys[curr.locs[i]][i].push_back(new_keys);
+                }
+            }
+
             if(key_found) {
                 continue;
             }
-            visited.insert(pair<char, unsigned>(curr.c, curr.keys.bitfield));
-            visited_keys[curr.c].push_back(new_keys);
 
-//            printf("Handling: %c, %i, %i, %08x\n", curr.c, curr.distance, curr.fitness, curr.keys.bitfield);
+//            printf("Handling: %c%c%c%c, %i, %i, %08x\n", curr.locs[0], curr.locs[1], curr.locs[2], curr.locs[3], curr.distance, curr.fitness, curr.keys.bitfield);
 
             if(new_keys.num_set() == num_keys) {
                 // We did it!
@@ -296,11 +328,22 @@ public:
                 }
 
                 // Gather the fitness of this new node.
-                int distance = distance_to(curr.c, neighbor, new_keys);
-                if(distance >= 0) {
-                    unsigned fitness = guesstimate(neighbor, new_keys);
-//                    printf("    Pushing: %c, %i, %i\n", neighbor, curr.distance + distance, fitness);
-                    frontier.push(Node(neighbor, fitness, new_keys, curr.distance + distance));
+                for(int i=0; i<num_bots; i++) {
+                    int distance = distance_to(curr.locs[i], neighbor, new_keys);
+                    if(distance >= 0) {
+                        unsigned fitness;
+                        if(num_bots == 1) {
+                            fitness = guesstimate(neighbor, new_keys);
+                        }
+                        else {
+                            fitness = guesstimate(neighbor, new_keys, i);
+                        }
+                        char new_locs[4];
+                        memcpy(new_locs, curr.locs, sizeof(new_locs));
+                        new_locs[i] = neighbor;
+//                        printf("    Pushing: %c, %i, %i\n", neighbor, curr.distance + distance, fitness);
+                        frontier.push(Node(new_locs, fitness, new_keys, curr.distance + distance));
+                    }
                 }
             }
         }
@@ -308,11 +351,39 @@ public:
         printf("Failed to find solution\n");
     }
 
+    void split() {
+        for(int i=0; i<board.size(); i++) {
+            for(int j=0; j<board[i].size(); j++) {
+                char c = board[i][j];
+                if(c == '@') {
+                    // Do some replacing.
+                    board[i][j] = '#';
+                    board[i][j-1] = '#';
+                    board[i][j+1] = '#';
+                    board[i+1][j] = '#';
+                    board[i-1][j] = '#';
+                    board[i-1][j-1] = '@';
+                    key_locs['@'] = Point(i-1, j-1);
+                    board[i-1][j+1] = '!';
+                    key_locs['!'] = Point(i-1, j+1);
+                    board[i+1][j-1] = '$';
+                    key_locs['$'] = Point(i+1, j-1);
+                    board[i+1][j+1] = '*';
+                    key_locs['*'] = Point(i+1, j+1);
+                }
+            }
+        }
+
+//        for(int i=0; i<num_keys; i++) {
+//            distance_to('@', 'a' + i, KeyBitfield(true));
+//        }
+    }
+
+
     vector<vector<char>> board;
     // Indexable via a letter
     Point key_locs[256];
     Point door_locs[256];
-    Point start_loc;
     int num_keys;
 };
 
@@ -322,6 +393,14 @@ public:
 // real    1m49.915s
 // user    1m49.888s
 // sys     0m0.008s
+
+// Part 2
+//We did it: 1996
+//
+//real   0m41.734s
+//user   0m41.643s
+//sys    0m0.016s
+
 
 int main(int argc, char ** argv) {
     FILE * file = fopen(argv[1], "r");
@@ -343,11 +422,10 @@ int main(int argc, char ** argv) {
 
     Maze maze(board);
     maze.print_board();
-    KeyBitfield test(false);
-    test.set('g');
-    printf("0x%08x %i\n", test.bitfield, test.get('g'));
-    printf("%i\n", maze.distance_to('@', 'p', KeyBitfield(false)));
-    maze.search_it();
+//    maze.search_it();
+    maze.split();
+    maze.print_board();
+    maze.search_it(4);
 
     return 0;
 }
