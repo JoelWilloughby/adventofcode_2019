@@ -22,12 +22,12 @@ struct Point {
 
     // Needed so we use this as a key in some maps
     bool operator< (const Point& other) const {
-        if(x < other.x) {
-            return true;
+        if(x != other.x) {
+            return x < other.x;
         }
 
-        if(y < other.y) {
-            return true;
+        if(y != other.y) {
+            return y < other.y;
         }
 
         return false;
@@ -190,9 +190,9 @@ public:
     // key to that door).
     bool vistable(const Point& p, const vector<vector<bool>>& visited, const KeyBitfield& keys) const {
         // Check out of bounds. Shouldn't happen due to the border but (shurg)
-        if(p.x < 0 || p.y < 0 || p.x >= board.size() || p.y >= board[0].size()) {
-            return false;
-        }
+//        if(p.x < 0 || p.y < 0 || p.x >= board.size() || p.y >= board[0].size()) {
+//            return false;
+//        }
 
         if(visited[p.x][p.y]) {
             return false;
@@ -223,24 +223,17 @@ public:
     // Note that we don't worry about collecting keys in this function. This is
     // due to the fact that in our outer loop, we will also handle the case
     // that we wnet directly to that key
-    int distance_to(char from, char to, const KeyBitfield& keys) const {
-        // Memoize
-        static map<tuple<char, char>, map<KeyBitfield, int>> memo;
-        tuple<char, char> memo_index(from, to);
-        unsigned bitfield = keys.bitfield;
-        auto res = memo.find(memo_index);
-        if(res != memo.end()) {
-            for(auto temp : res->second) {
-                if(temp.first.contains(keys)) {
-                    // printf("Used memo!\n");
-                    return temp.second;
-                }
-            }
-        }
-
+    map<char, int> distance_from(char from, const KeyBitfield& keys) const {
         queue<pair<Point, int>> frontier;
         frontier.push(pair<Point, int>(key_locs[from], 0));
-        Point target = key_locs[to];
+        map<Point, char> targets;
+        for(int i=0; i<num_keys; i++) {
+            char c = 'a' + i;
+            if(c == from || keys.get(c)) {
+                continue;
+            }
+            targets[key_locs[c]] = c;
+        }
 
         vector<vector<bool>> visited;
         for(int i=0; i<board.size(); i++) {
@@ -251,14 +244,15 @@ public:
             visited.push_back(temp);
         }
 
-        // Must search over cells. This is quite annoying and why we need to cache!
+        map<char, int> distances;
+
         while(!frontier.empty()) {
             pair<Point, int> curr = frontier.front();
             frontier.pop();
 
-            if(curr.first == target) {
-                memo[memo_index][keys] = curr.second;
-                return curr.second;
+            auto temp = targets.find(curr.first);
+            if(temp != targets.end()) {
+                distances[temp->second] = curr.second;
             }
 
             // Mark visited
@@ -284,8 +278,7 @@ public:
             }
         }
 
-        memo[memo_index][keys] = -1;
-        return -1;
+        return distances;
     }
 
     // Heuristic for evaluating estimated cost to goal
@@ -354,65 +347,64 @@ public:
             // Check to see if this node is a strictly worse node than we have seen
             // before
             bool key_found = false;
-            for(int i=0; i<num_bots; i++) {
+            for (int i = 0; i < num_bots; i++) {
                 if (isalpha(curr.locs[i])) {
                     // Visit this new location
                     new_keys.set(curr.locs[i]);
                 }
             }
-            for(int i=0; i<num_bots; i++) {
-                for(auto key : visited_keys[curr.locs[i]][i]) {
-                    if(key.contains(new_keys)) {
+            for (int i = 0; i < num_bots; i++) {
+                for (auto key : visited_keys[curr.locs[i]][i]) {
+                    if (key.contains(new_keys)) {
                         // This set of keys is a direct subset of an already found
                         // set of keys and we are at the same location.
                         key_found = true;
                     }
                 }
 
-                if(!key_found) {
+                if (!key_found) {
                     // Add it to our cache
                     visited_keys[curr.locs[i]][i].push_back(new_keys);
                 }
             }
 
-            if(key_found) {
+            if (key_found) {
                 continue;
             }
 
             // Debugging proves useful
 //            printf("Handling: %c%c%c%c, %i, %i, %08x\n", curr.locs[0], curr.locs[1], curr.locs[2], curr.locs[3], curr.distance, curr.fitness, curr.keys.bitfield);
 
-            if(new_keys.num_set() == num_keys) {
+            if (new_keys.num_set() == num_keys) {
                 // We did it! We found all the keys!
                 printf("We did it: %i\n", curr.distance);
                 return;
             }
 
-            for(int i=0; i<num_keys; i++) {
-                // Search through all the possible neighbors
-                char neighbor = 'a' + i;
-                if(new_keys.get(neighbor)) {
-                    // Already visited this node on this path
-                    continue;
-                }
-
-                // Gather the fitness of this new node.
-                for(int i=0; i<num_bots; i++) {
-                    int distance = distance_to(curr.locs[i], neighbor, new_keys);
-                    if(distance >= 0) {
-                        unsigned fitness;
-                        if(num_bots == 1) {
-                            fitness = guesstimate(neighbor, new_keys);
-                        }
-                        else {
-                            fitness = guesstimate(neighbor, new_keys, i);
-                        }
-                        char new_locs[4];
-                        memcpy(new_locs, curr.locs, sizeof(new_locs));
-                        new_locs[i] = neighbor;
-//                        printf("    Pushing: %c, %i, %i\n", neighbor, curr.distance + distance, fitness);
-                        frontier.push(Node(new_locs, fitness, new_keys, curr.distance + distance));
+            // Gather the fitness of this new node.
+            for (int i = 0; i < num_bots; i++) {
+                char new_locs[4];
+                memcpy(new_locs, curr.locs, sizeof(new_locs));
+                auto distances = distance_from(curr.locs[i], new_keys);
+                for (auto it : distances) {
+                    char neighbor = it.first;
+                    int distance = it.second;
+                    if (new_keys.get(neighbor)) {
+                        continue;
                     }
+                    if(distance <= 0) {
+                        continue;
+                    }
+
+                    unsigned fitness;
+                    if (num_bots == 1) {
+                        fitness = guesstimate(neighbor, new_keys);
+                    } else {
+                        fitness = guesstimate(neighbor, new_keys, i);
+                    }
+                    new_locs[i] = neighbor;
+//                    printf("   %i Pushing: %c, %i, %i\n", i, neighbor, curr.distance + distance, fitness);
+                    frontier.push(Node(new_locs, fitness, new_keys, curr.distance + distance));
                 }
             }
         }
@@ -489,7 +481,7 @@ int main(int argc, char ** argv) {
     Maze maze(board);
     maze.print_board();
     // Uncomment to run part 1 as well. Can take a while
-//    maze.search_it();
+    maze.search_it();
     maze.split();
     maze.print_board();
     maze.search_it(4);
