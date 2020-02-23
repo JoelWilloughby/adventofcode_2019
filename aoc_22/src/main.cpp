@@ -5,47 +5,21 @@
 
 using namespace std;
 
-class Deck {
+class Card {
 public:
-    Deck(int n) {
-        for(int i=0; i<n; i++) {
-            deck.push_back(i);
-        }
-        top = 0;
-        dir = 1;
+    Card(int deck_size, int position, int value) : deck_size(deck_size), position(position), value(value) {
+
     }
 
-    int find(int val) const {
-        int next = top;
-        for(int i=0; i<deck.size(); i++) {
-            if(deck[next] == val) {
-                return i;
-            }
-            next += deck.size() + dir;
-            next %= deck.size();
-        }
-        return -1;
-    }
-
-    void print() const {
-        int next = top;
-        for(int i=0; i<deck.size(); i++) {
-            printf("%i ", deck[next]);
-            next += deck.size() + dir;
-            next %= deck.size();
-        }
-        printf("\n");
-        printf("Top: %i, dir: %i\n", top, dir);
-    }
-
-    vector<int> deck;
-    int top;
-    int dir;
+    int deck_size;
+    int position;
+    int value;
 };
 
 class Action {
 public:
-    virtual void doit(Deck& deck) = 0;
+    virtual void op_card(Card& card) = 0;
+//    virtual void op_pos(Card& card) = 0;
     virtual void print() const = 0;
 };
 
@@ -55,9 +29,13 @@ public:
 
     }
 
-    void doit(Deck& deck) {
-        deck.top += deck.deck.size() + deck.dir * n;
-        deck.top %= deck.deck.size();
+    void op_card(Card& card) {
+        card.position += card.deck_size - n;
+        card.position %= card.deck_size;
+    }
+
+    void op_pos(Card& card) {
+
     }
 
     void print() const {
@@ -69,10 +47,8 @@ public:
 
 class NewStack : public Action {
 public:
-    void doit(Deck& deck) {
-        deck.dir *= -1;
-        deck.top += deck.deck.size() + deck.dir;
-        deck.top %= deck.deck.size();
+    void op_card(Card& card) {
+        card.position = card.deck_size - card.position - 1;
     }
 
     void print() const {
@@ -86,19 +62,10 @@ public:
 
     }
 
-    void doit(Deck& deck) {
-        vector<int> temp = deck.deck;
-        int index = deck.top;
-        int next = 0;
-        for(int i=0; i<deck.deck.size(); i++) {
-            deck.deck[next] = temp[index];
-            next += temp.size() + n;
-            next %= temp.size();
-            index += temp.size() + deck.dir;
-            index %= temp.size();
-        }
-        deck.top = 0;
-        deck.dir = 1;
+    void op_card(Card& card) {
+        // May have to perform this one by one
+        long long temp = n * card.position;
+        card.position = temp % card.deck_size;
     }
 
     void print() const {
@@ -132,17 +99,13 @@ int main(int argc, char ** argv) {
         buf = NULL;
     }
 
-    Deck deck(10007);
-//    Deck deck(10);
-
-    printf("Find 2019 = %i\n", deck.find(2019));
-//    deck.print();
+    Card card(10007, 2019, 2019);
+    printf("Find 2019 = %i\n", card.position);
 
     for(auto p : actions) {
-        p->doit(deck);
+        p->op_card(card);
 //        p->print();
-//        deck.print();
     }
 
-    printf("Find 2019 = %i\n", deck.find(2019));
+    printf("Find 2019 = %i\n", card.position);
 }
