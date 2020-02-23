@@ -13,7 +13,7 @@
 using namespace std;
 
 struct Point {
-    Point(int x=0, int y=0) : x(x), y(y) {
+    Point(int x=0, int y=0, int depth_modifier=0) : x(x), y(y), depth_modifier(depth_modifier) {
     }
 
     bool operator== (const Point& other) const {
@@ -53,16 +53,18 @@ struct Point {
 
     int x;
     int y;
+    int depth_modifier;
 };
 
 struct Node {
-    Node(const string& value, const string& parent, int distance) : value(value), parent(parent), distance(distance) {
+    Node(const string& portal, const Point& loc, int distance, int depth) : loc(loc), distance(distance), depth(depth), portal(portal) {
 
     }
 
     int distance;
-    string parent;
-    string value;
+    int depth;
+    Point loc;
+    string portal;
 };
 
 struct NodeCompare {
@@ -71,8 +73,11 @@ struct NodeCompare {
         if(lhs.distance != rhs.distance) {
             return lhs.distance > rhs.distance;
         }
+        if(lhs.depth != rhs.depth) {
+            return lhs.depth < rhs.depth;
+        }
 
-        return lhs.parent < rhs.parent;
+        return lhs.loc < rhs.loc;
     }
 };
 
@@ -91,6 +96,14 @@ public:
         }
 
         return board[p.x][p.y];
+    }
+
+    bool is_inside(const Point& point) const {
+        int x_edge_dist = min(static_cast<size_t>(point.x), board.size() - point.x);
+        int y_edge_dist = min(point.y, y_size - point.y);
+
+        return !(x_edge_dist < 5 || y_edge_dist < 4);
+
     }
 
     pair<string, Point> find_string(const Point& loc) const {
@@ -120,6 +133,14 @@ public:
             temp.push_back(c);
             temp.push_back(down);
             portal = loc.up();
+        }
+
+        // Uncomment to do part 1
+        if(is_inside(portal)) {
+            portal.depth_modifier = 1;
+        }
+        else {
+            portal.depth_modifier = -1;
         }
 
         return pair<string, Point>(temp, portal);
@@ -204,46 +225,15 @@ public:
         return -1;
     }
 
-    int string_distance(const string& a, const string& b) const{
-        auto a_points = portals.at(a);
-        auto b_points = portals.at(b);
-        int dist1 = distance(a_points.first, b_points.first);
-        int dist2 = distance(a_points.first, b_points.second);
-        int dist3 = distance(a_points.second, b_points.first);
-        int dist4 = distance(a_points.second, b_points.second);
-
-        bool found = false;
-        int min = 100000000;
-        if(dist1 >= 0) {
-            found = true;
-            min = min < dist1 ? min : dist1;
-        }
-        if(dist2 >= 0) {
-            found = true;
-            min = min < dist2 ? min : dist2;
-        }
-        if(dist3 >= 0) {
-            found = true;
-            min = min < dist3 ? min : dist3;
-        }
-        if(dist4 >= 0) {
-            found = true;
-            min = min < dist4 ? min : dist4;
-        }
-
-        if(found) {
-            return min;
-        }
-
-        return -1;
-    }
-
     void initialize(const vector<vector<char>>& board_) {
         board = board_;
         portals.clear();
         map<string, Point> temp_portals;
-
+        y_size = 0;
         for(int i=0; i<board.size(); i++) {
+            if(y_size < board[i].size()) {
+                y_size = board[i].size();
+            }
             for(int j=0; j<board[i].size(); j++) {
                 char c = board[i][j];
                 if(isalpha(c)) {
@@ -255,21 +245,23 @@ public:
                     }
                     printf("Found portal: %s\n", s.c_str());
                     if(s == "AA") {
+                        loc.depth_modifier = -100;
                         start = loc;
                         portals[s] = pair<Point, Point>(loc, loc);
                     }
                     else if(s == "ZZ") {
+                        loc.depth_modifier = -100;
                         end = loc;
                         portals[s] = pair<Point, Point>(loc, loc);
                     }
                     else if(temp_portals.find(s) != temp_portals.end()) {
                         // Already here
                         portals[s] = pair<Point, Point>(loc, temp_portals[s]);
-                        board[loc.x][loc.y] = '*';
+                        board[loc.x][loc.y] = loc.depth_modifier > 0 ? '+' : '-';
                     }
                     else {
                         temp_portals[s] = loc;
-                        board[loc.x][loc.y] = '*';
+                        board[loc.x][loc.y] = loc.depth_modifier > 0 ? '+' : '-';
                     }
                 }
             }
@@ -280,9 +272,9 @@ public:
         // Gonna be a version of djikstra's algorithm
         priority_queue<Node, vector<Node>, NodeCompare> frontier;
 
-        frontier.push(Node("AA", "", 0));
+        frontier.push(Node("AA", start, 0, 0));
 
-        set<string> visited;
+        set<pair<Point, int>> visited;
 
         int distance_no_portals = distance(start, end);
         int distance_with_portals = 0;
@@ -292,39 +284,56 @@ public:
             auto curr = frontier.top();
             frontier.pop();
 
-            if(visited.find(curr.value) != visited.end()) {
+            if(visited.find(pair<Point, int>(curr.loc, curr.depth)) != visited.end()) {
                 continue;
             }
 
-            visited.insert(curr.value);
+            visited.insert(pair<Point, int>(curr.loc, curr.depth));
 
-            printf("Visiting Node: %s, parent: %s, dist: %i\n", curr.value.c_str(), curr.parent.c_str(), curr.distance);
+//            printf("Visiting Node: %s%+i, depth: %i, dist: %i\n", curr.portal.c_str(), curr.loc.depth_modifier, curr.depth, curr.distance);
 
-            if(curr.value == "ZZ") {
+            if(curr.loc == end && curr.depth == 0) {
                 // Found it!
                 found = true;
                 distance_with_portals = curr.distance;
                 break;
             }
 
-
-            Point a = portals.at(curr.value).first;
-            Point b = portals.at(curr.value).second;
             // Add all neighbors to the que with a nice decrease key
             for(auto temp : portals) {
-                if(temp.first == curr.value) {
+                if(temp.first == "AA") {
                     continue;
                 }
-                int distance = string_distance(curr.value, temp.first);
-                if(distance < 0) {
+                if(temp.second.first == curr.loc) {
+                    int depth = curr.depth + temp.second.first.depth_modifier;
+                    if(depth < portals.size() && depth >= 0) {
+//                        printf("    Pushing node: %s%+i, new depth: %i\n", temp.first.c_str(), temp.second.second.depth_modifier, depth);
+                        frontier.push(Node(temp.first, temp.second.second, curr.distance + 1, depth));
+                    }
+                    continue;
+                }
+                if(temp.second.second == curr.loc) {
+                    int depth = curr.depth + temp.second.second.depth_modifier;
+                    if(depth < portals.size() && depth >= 0) {
+//                        printf("    Pushing node: %s%+i, new depth: %i\n", temp.first.c_str(), temp.second.first.depth_modifier, depth);
+                        frontier.push(Node(temp.first, temp.second.first, curr.distance + 1, depth));
+                    }
                     continue;
                 }
 
-                printf("  Pushing %s, %i\n", temp.first.c_str(), curr.distance + distance + 1);
-                // Plus one to count the move through the portal
-                frontier.push(Node(temp.first, curr.value, curr.distance + distance + 1));
+                int distance_1 = distance(curr.loc, temp.second.first);
+                int distance_2 = distance(curr.loc, temp.second.second);
+                if(distance_1 >= 0) {
+                    // Its a valid node
+//                    printf("    Pushing node: %s%+i, new distance: %i\n", temp.first.c_str(), temp.second.first.depth_modifier, curr.distance + distance_1);
+                    frontier.push(Node(temp.first, temp.second.first, curr.distance + distance_1, curr.depth));
+                }
+                if(distance_2 >= 0) {
+                    // Its a valid node
+//                    printf("    Pushing node: %s%+i, new distance: %i\n", temp.first.c_str(), temp.second.second.depth_modifier, curr.distance + distance_2);
+                    frontier.push(Node(temp.first, temp.second.second, curr.distance + distance_2, curr.depth));
+                }
             }
-
         }
 
         if(!found) {
@@ -355,6 +364,7 @@ public:
     }
 
     vector<vector<char>> board;
+    int y_size;
     map<string, pair<Point, Point>> portals;
     Point start;
     Point end;
