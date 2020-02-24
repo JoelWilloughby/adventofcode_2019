@@ -6,111 +6,133 @@
 
 using namespace std;
 
-class Card {
+long long inv_mod(long long base, long long val) {
+    // Do euclid's algorithm
+    vector<long long> r;
+    vector<long long> q;
+    r.push_back(base);
+    r.push_back(val);
+    q.push_back(0);
+    q.push_back(0);
+
+    int n = 1;
+    while(r[n]) {
+        n++;
+        long long next_q = r[n-2] / r[n-1];
+        long long next_r = r[n-2] % r[n-1];
+
+        r.push_back(next_r);
+        q.push_back(next_q);
+    }
+
+    n--;
+
+    if(r[n] != 1) {
+        // Not coprime
+        return 0;
+    }
+
+    long long w = 1;
+    long long v = 0;
+    // Backtrack
+    for(int i=0; i<=n-2; i++) {
+        long long temp = v;
+        v = w;
+        w = temp - q[n-i] * w;
+    }
+
+    if((w * val) % base != 1 && (w * val) % base != -(base - 1)) {
+        printf("Failure of inv: %lli %lli %lli\n", base, val, w);
+    }
+
+    // Return the inverse
+    return w;
+}
+
+class Shuffle {
 public:
-    Card(long long deck_size, long long position, long long value) : deck_size(deck_size), position(position), value(value) {
+    Shuffle(long long base) : base(base), m(1), b(0) {
 
     }
 
-    long long deck_size;
-    long long position;
-    long long value;
+    long long at(long long position) const {
+        return (base + ((m * position + b) % base)) % base;
+    }
+
+    void fixup() {
+        m %= base;
+        b %= base;
+    }
+
+    void print() const {
+        printf("y = %llix + %lli mod %lli\n", m, b, base);
+    }
+
+    long long inv(long long y) {
+        long long minv = inv_mod(base, m); //TBD
+        return (base + (minv * (y - b)) % base) % base;
+    }
+
+    long long base;
+    long long m;
+    long long b;
 };
 
-class Action {
+class Operation {
 public:
-    virtual void op_card(Card& card) = 0;
-    virtual void op_pos(Card& card) = 0;
+    virtual void op(Shuffle& card) const = 0;
     virtual void print() const = 0;
 };
 
-class Cut : public Action {
+class Cut : public Operation {
 public:
     Cut(int n) : n(n) {
 
     }
 
-    void op_card(Card& card) {
-        card.position += card.deck_size - n;
-        card.position %= card.deck_size;
-    }
-
-    void op_pos(Card& card) {
-        card.position += card.deck_size + n;
-        card.position %= card.deck_size;
+    void op(Shuffle& f) const {
+        f.b += f.m*n;
+        f.fixup();
     }
 
     void print() const {
-        printf("Cut %i\n", n);
+        printf("CUT %i\n", n);
     }
 
     int n;
 };
 
-class NewStack : public Action {
+class NewStack : public Operation {
 public:
-    void op_card(Card& card) {
-        card.position = card.deck_size - card.position - 1;
-    }
 
-    void op_pos(Card& card) {
-        card.position = card.deck_size - card.position - 1;
+    void op(Shuffle& f) const {
+        long long m = f.m;
+        long long b = f.b;
+        f.m = -m;
+        f.b = b - m;
+        f.fixup();
     }
 
     void print() const {
-        printf("deal into new stack\n");
+        printf("STCK:\n");
     }
 };
 
-class DealInto : public Action {
+class Incr : public Operation {
 public:
-    DealInto(int n) : n(n), cached_val(-1) {
+    Incr(int n) : n(n) {
 
     }
-
-    void op_card(Card& card) {
-        // May have to perform this one by one
-        long long temp = n * card.position;
-        card.position = temp % card.deck_size;
-    }
-
-    void op_pos(Card& card) {
-        if(cache.empty() || cached_val != card.deck_size) {
-            cache.clear();
-            cached_val = card.deck_size;
-            for(int i=0; i<n; i++) {
-                cache.push_back(0);
-            }
-            bool done = false;
-            long long rem = 0;
-            long long count = 0;
-            while(!done) {
-                count += 1 + (card.deck_size - rem - 1) / n;
-                rem = n - ((card.deck_size - rem) % n);
-                rem = (rem + n) % n;
-                if(rem == 0) {
-                    done = true;
-                    break;
-                }
-                if(rem < 0) {
-                    printf("Whoops");
-                    exit(1);
-                }
-                cache[rem] = count;
-            }
-        }
-
-        long long rem = card.position % n;
-        long long count = cache[rem];
-        card.position = count + (card.position - rem) / n;
+    void op(Shuffle& f) const {
+        long long m = f.m;
+        f.m *= inv_mod(f.base, n);
+        f.fixup();
     }
 
     void print() const {
-        printf("deal with increment %i\n", n);
+        printf("INCR %i\n", n);
     }
 
-    vector<long long> cache;
-    long long cached_val;
     int n;
 };
 
@@ -118,14 +140,14 @@ int main(int argc, char ** argv) {
     FILE * file = fopen(argv[1], "r");
     char* buf = NULL;
     size_t len = 0;
-    vector<Action*> actions;
+    vector<Operation*> actions;
     while(getline(&buf, &len, file) > 0) {
         int temp;
         if(strcmp(buf, "deal into new stack\n") == 0) {
             actions.push_back(new NewStack());
         }
         else if(sscanf(buf, "deal with increment %i", &temp) > 0) {
-            actions.push_back(new DealInto(temp));
+            actions.push_back(new Incr(temp));
         }
         else if(sscanf(buf, "cut %i", &temp) > 0){
             actions.push_back(new Cut(temp));
@@ -138,59 +160,11 @@ int main(int argc, char ** argv) {
         buf = NULL;
     }
 
-    Card card(10007, 2019, 2019);
+    Shuffle shuff(10007);
     for(auto p : actions) {
-        p->op_card(card);
+        p->op(shuff);
     }
-    printf("Find 2019 = %lli\n", card.position);
+    shuff.print();
 
-    Card test(10007, 1498, 0);
-    for(auto iter = actions.rbegin(); iter != actions.rend(); iter++) {
-        (*iter)->op_pos(test);
-    }
-
-    printf("Find 2019? %lli\n", test.position);
-
-    long long total_cards = 119315717514047;
-    long long total_round = 101741582076661;
-    long long max_long_lo = 9223372036854775807;
-    long long loop_size = -1;
-    long long loop_start = -1;
-    unordered_map<long long, long long> cache;
-    Card pos(total_cards, 2020, 0);
-    for(long long i=0; i<total_round; i++) {
-        cache[pos.position] = i;
-
-        for(auto iter = actions.rbegin(); iter != actions.rend(); iter++) {
-//            (*iter)->print();
-            (*iter)->op_pos(pos);
-        }
-
-        if(cache.find(pos.position) != cache.end()) {
-            // We have a loop
-            loop_size = i - cache[pos.position];
-            loop_start = cache[pos.position];
-            printf("Loop size found %lli at count: %lli, loop_size: %lli\n", pos.position, i, loop_size);
-            break;
-        }
-
-//        printf("%lli\n", pos.position);
-        if(i % 1000000 == 0) {
-            printf("%lli\n", i);
-        }
-    }
-
-    // Hopefully found outside of loop
-    if(loop_size > 0) {
-        long long total_rounds_left = total_round - loop_start;
-        long long loop_offset = (total_rounds_left - 1) % loop_size;
-
-        for(long long i=0; i<loop_size; i++) {
-            for(auto iter = actions.rbegin(); iter != actions.rend(); iter++) {
-                (*iter)->op_pos(pos);
-            }
-        }
-    }
-
-    printf("Find it? %lli\n", pos.position);
+    printf("Find 2019 = %lli\n", shuff.inv(2019));
 }
