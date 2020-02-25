@@ -6,7 +6,26 @@
 
 using namespace std;
 
+long long mod_power(long long base, long long x, long long n) {
+    if(n == 0) {
+        return 1;
+    }
+
+    long long accum = mod_power(base, x, n/2);
+    accum *= accum;
+    if(n % 2) {
+        accum *= x;
+    }
+    accum %= base;
+
+    return accum;
+}
+
 long long inv_mod(long long base, long long val) {
+    if(val < 0) {
+        val += base;
+    }
+
     // Do euclid's algorithm
     vector<long long> r;
     vector<long long> q;
@@ -29,6 +48,7 @@ long long inv_mod(long long base, long long val) {
 
     if(r[n] != 1) {
         // Not coprime
+        printf("Not coprime passed %lli %lli %lli\n", base, val, r[n]);
         return 0;
     }
 
@@ -39,9 +59,11 @@ long long inv_mod(long long base, long long val) {
         long long temp = v;
         v = w;
         w = temp - q[n-i] * w;
+        w %= base;
     }
 
-    if((w * val) % base != 1 && (w * val) % base != -(base - 1)) {
+    long long check = (w * val) % base;
+    if(check != 1 && check + base != 1) {
         printf("Failure of inv: %lli %lli %lli\n", base, val, w);
     }
 
@@ -71,6 +93,15 @@ public:
     long long inv(long long y) {
         long long minv = inv_mod(base, m); //TBD
         return (base + (minv * (y - b)) % base) % base;
+    }
+
+    void invert() {
+        long long new_m = inv_mod(base, m);
+        long long new_b = -new_m * b;
+
+        m = new_m;
+        b = new_b;
+        fixup();
     }
 
     long long base;
@@ -162,9 +193,32 @@ int main(int argc, char ** argv) {
 
     Shuffle shuff(10007);
     for(auto p : actions) {
+        shuff.print();
         p->op(shuff);
+        p->print();
     }
     shuff.print();
 
-    printf("Find 2019 = %lli\n", shuff.inv(2019));
+    shuff.invert();
+    printf("Find 2019 = %lli\n", shuff.at(2019));
+
+    long long num_cards = 119315717514047;
+    long long num_round = 101741582076661;
+    Shuffle temp(num_cards);
+    for(auto p : actions) {
+        p->op(temp);
+    }
+//    temp.invert();
+    temp.print();
+
+    long long m_to_the_n = mod_power(temp.base, temp.m, num_round);
+    long long m_minus_one_inv = inv_mod(temp.base, temp.m - 1);
+
+    temp.b = m_minus_one_inv * (m_to_the_n - 1) * temp.b;
+    temp.m = m_to_the_n;
+    temp.fixup();
+
+    temp.print();
+
+    printf("Do it 2020: %lli\n", temp.at(2020));
 }
