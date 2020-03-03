@@ -19,7 +19,7 @@ void Computer::reset() {
     this->rel_idx = 0;
 }
 
-void Computer::write(int input) {
+void Computer::write(el_type input) {
     this->input.push_back(input);
 }
 

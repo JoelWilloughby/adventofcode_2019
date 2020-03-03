@@ -16,7 +16,7 @@ public:
     void run_to_done();
     void run_to_done(std::vector<el_type>& input);
 
-    void write(int input);
+    void write(el_type input);
 
     el_type value_at(int index);
     const std::vector<el_type>& get_output();
