@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
     el_type nat_y;
     map<el_type, bool> nat_ys;
 
-    int empty_and_waiting[NUM_PUTERS];
+    int idle[NUM_PUTERS];
 
     // Load up the computers with something
     for(auto i=0; i<NUM_PUTERS; i++) {
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
         // Give each puter its id
         printf("Sending %i\n", i);
         puters[i].write(i);
-        empty_and_waiting[i] = 0;
+        idle[i] = 0;
     }
 
     bool done = false;
@@ -48,14 +48,17 @@ int main(int argc, char** argv) {
             if(puters[i].needs_input()) {
                 // Provide it with no input
                 puters[i].write(-1);
-                empty_and_waiting[i]++;
+                idle[i]++;
+//                if(idle[i] % 10 == 0) {
+//                    printf("%i empty: %i\n", i, idle[i]);
+//                }
             }
             puters[i].step();
         }
 
         bool waiting = true;
         for(int i=0; i<NUM_PUTERS; i++) {
-            if(empty_and_waiting[i] < 10) {
+            if(idle[i] < 2) {
                 waiting = false;
                 break;
             }
@@ -64,13 +67,12 @@ int main(int argc, char** argv) {
         if(waiting) {
             puters[0].write(nat_x);
             puters[0].write(nat_y);
-            empty_and_waiting[0] = 0;
+            idle[0] = 0;
+            printf("NAT sending out %i, %i\n", nat_x, nat_y);
             if(nat_ys.find(nat_y) != nat_ys.end()) {
                 printf("Second occurence of %i\n", nat_y);
-                done = true;
                 return 0;
             }
-            printf("NAT sending out %i, %i\n", nat_x, nat_y);
             nat_ys[nat_y] = true;
         }
 
@@ -85,22 +87,23 @@ int main(int argc, char** argv) {
                 }
                 inputs[i].push_back(temp);
                 if(inputs[i].size() == 3) {
+                    idle[i] = 0;
                     el_type dest = inputs[i][0];
                     el_type x = inputs[i][1];
                     el_type y = inputs[i][2];
-                    printf("%i -> %i: (%i, %i)\n", i, dest, x, y);
+//                    printf("%i -> %i: (%i, %i)\n", i, dest, x, y);
                     if(dest == 255) {
                         // The value we are looking for:
-                        printf("Y value sent to 255 is: %i\n", temp);
+                        printf("Sending to 255: %i, %i\n", x, y);
                         nat_x = x;
                         nat_y = y;
                     }
                     else {
                         puters[dest].write(x);
                         puters[dest].write(y);
-                        empty_and_waiting[dest] = 0;
-                        inputs[i].clear();
+                        idle[dest] = 0;
                     }
+                    inputs[i].clear();
                 }
            }
         }
